@@ -17,7 +17,7 @@ V_PYTHON		= $(VENV_BIN)/python
 MYPY_FLAGS		= --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 FLAKE			= $(VENV_BIN)/flake8
 MYPY			= $(VENV_BIN)/mypy
-EXCLUDE			= $(VENV),data/raw/
+EXCLUDE			= $(VENV),data/raw/,vllm-0.10.1/
 ARGS ?=
 
 all: run
@@ -26,13 +26,13 @@ all: run
 setup-venv:
 	@if [ "$(HAS_SGOINFRE)" = "yes" ]; then \
 		if [ ! -L $(VENV) ] && [ ! -d $(VENV) ]; then \
-			echo "⚙️ Cluster 42 détecté : Création du lien symbolique vers le sgoinfre..."; \
+			echo "[INFO] Cluster 42 détecté : Création du lien symbolique vers le sgoinfre..."; \
 			mkdir -p $(VENV_TARGET); \
 			ln -s $(VENV_TARGET) $(VENV); \
 		fi \
 	else \
 		if [ ! -d $(VENV) ]; then \
-			echo "🏠 Machine maison détectée : Initialisation d'un .venv standard..."; \
+			echo "[INFO] Machine maison détectée : Initialisation d'un .venv standard..."; \
 			uv venv $(VENV); \
 		fi \
 	fi
