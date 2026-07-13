@@ -33,4 +33,4 @@ class MinimalAnswer(MinimalSearchResults):
         answer: Generated answer text, when available.
     """
 
-    answer: str | None
+    answer: str

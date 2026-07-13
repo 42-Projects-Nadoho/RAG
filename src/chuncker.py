@@ -4,12 +4,53 @@ from pydantic import BaseModel
 
 
 class Chunk(BaseModel):
-    """Represents a chunk of text from a file."""
+    """
+    Represents a chunk of text from a file with strict character offsets.
+    """
 
     file_path: str
     content: str
     first_character_index: int
     last_character_index: int
+
+
+def _split_oversized(file_path: str,
+                     content: str,
+                     start: int,
+                     end: int,
+                     max_chunk_size: int,
+                     ) -> List[Chunk]:
+    """
+    Broke a too large block to smal-chunks with a slice window
+    """
+    chunks: List[Chunk] = []
+    size = end - start
+
+    if size <= max_chunk_size:
+        return [Chunk(
+            file_path=file_path,
+            content=content[start:end],
+            first_character_index=start,
+            last_character_index=end
+        )]
+
+    overlap = max_chunk_size // 10
+    step = max_chunk_size - overlap
+    pos = start
+
+    while pos < end:
+        sub_end = min(pos + max_chunk_size, end)
+        chunks.append(Chunk(
+            file_path=file_path,
+            content=content[pos:sub_end],
+            first_character_index=pos,
+            last_character_index=sub_end
+        ))
+        if sub_end >= end:
+            break
+        pos += step
+
+    return chunks
 
 
 def chunk_markdown(file_path: str, max_chunk_size: int = 2000) -> List[Chunk]:
@@ -28,52 +69,41 @@ def chunk_markdown(file_path: str, max_chunk_size: int = 2000) -> List[Chunk]:
             raise ValueError("[ERROR] : not the adapted file format")
         with open(file_path, "r", encoding="utf-8") as file:
             content = file.read()
-    except FileNotFoundError:
-        print(f"File not found: {file_path}")
-        return []
-    except UnicodeDecodeError:
-        print(f"Could not decode file: {file_path}")
-        return []
-    except OSError as e:
-        print(f"Error reading file {file_path}: {e}")
-        return []
-    except ValueError as e:
-        print(e)
+    except (FileNotFoundError, UnicodeDecodeError, OSError, ValueError) as e:
+        print(f"Error handling file {file_path}: {e}")
         return []
 
+    if not content:
+        return []
+
+    lines = content.splitlines(keepends=True)
+    line_offsets = [0]
+    for line in lines:
+        line_offsets.append(line_offsets[-1] + len(line))
+
+    section_starts: List[int] = []
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("#"):
+            section_starts.append(line_offsets[i])
+
+    if not section_starts or section_starts[0] != 0:
+        section_starts.insert(0, 0)
+
+    boundaries = section_starts + [len(content)]
     chunks: List[Chunk] = []
-    current_start = 0
-    current_text = ""
 
-    for line in content.splitlines(keepends=True):
-        if line.startswith("#") and current_text:
-            new_chunk = Chunk(
-                file_path=file_path,
-                content=current_text,
-                first_character_index=current_start,
-                last_character_index=current_start + len(current_text)
+    for i in range(len(boundaries) - 1):
+        start, end = boundaries[i], boundaries[i + 1]
+        if content[start:end].strip():
+            chunks.extend(
+                _split_oversized(
+                    file_path,
+                    content,
+                    start,
+                    end,
+                    max_chunk_size
+                )
             )
-            if len(current_text) > max_chunk_size:
-                chunks.extend(_split_large_chunk(new_chunk, max_chunk_size))
-            else:
-                chunks.append(new_chunk)
-
-            current_start += len(current_text)
-            current_text = line
-        else:
-            current_text += line
-
-    if current_text:
-        new_chunk = Chunk(
-            file_path=file_path,
-            content=current_text,
-            first_character_index=current_start,
-            last_character_index=current_start + len(current_text)
-        )
-        if len(current_text) > max_chunk_size:
-            chunks.extend(_split_large_chunk(new_chunk, max_chunk_size))
-        else:
-            chunks.append(new_chunk)
 
     return chunks
 
@@ -94,20 +124,10 @@ def chunk_python(file_path: str, max_chunk_size: int = 2000) -> List[Chunk]:
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
         tree = ast.parse(content)
-    except ValueError as e:
-        print(e)
-        return []
-    except FileNotFoundError:
-        print(f"File not found: {file_path}")
-        return []
-    except UnicodeDecodeError:
-        print(f"Could not decode file: {file_path}")
-        return []
-    except SyntaxError as e:
-        print(f"Syntax error in file {file_path}: {e}")
-        return []
-    except OSError as e:
-        print(f"Error reading file {file_path}: {e}")
+    except (
+        FileNotFoundError, UnicodeDecodeError, SyntaxError, OSError, ValueError
+    ) as e:
+        print(f"Error handling file {file_path}: {e}")
         return []
 
     lines = content.splitlines(keepends=True)
@@ -115,67 +135,58 @@ def chunk_python(file_path: str, max_chunk_size: int = 2000) -> List[Chunk]:
     for line in lines:
         line_starts.append(line_starts[-1] + len(line))
 
+    top_level = [
+        node for node in tree.body
+        if isinstance(
+            node,
+            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        )
+    ]
+
     chunks: List[Chunk] = []
-    for node in tree.body:
-        if isinstance(node, (
-            ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef
+    cursor = 0
+
+    for node in top_level:
+        if node.end_lineno is None:
+            continue
+
+        start = line_starts[node.lineno - 1]
+        end = line_starts[node.end_lineno]
+
+        if start > cursor:
+            if content[cursor:start].strip():
+                chunks.extend(
+                    _split_oversized(
+                            file_path, content, cursor, start, max_chunk_size
+                        )
+                    )
+
+        chunks.extend(_split_oversized(
+            file_path,
+            content, start,
+            end, max_chunk_size
             )
-        ):
-            if node.end_lineno is None:
-                continue
-            start = line_starts[node.lineno - 1]
-            end = line_starts[node.end_lineno]
-            chunk_content = content[start:end]
+        )
+        cursor = end
 
-            new_chunk = Chunk(
-                file_path=file_path,
-                content=chunk_content,
-                first_character_index=start,
-                last_character_index=end
+    if cursor < len(content):
+        if content[cursor:].strip():
+            chunks.extend(_split_oversized(
+                    file_path,
+                    content,
+                    cursor,
+                    len(content),
+                    max_chunk_size
+                )
             )
-            if len(chunk_content) > max_chunk_size:
-                chunks.extend(_split_large_chunk(new_chunk, max_chunk_size))
-            else:
-                chunks.append(new_chunk)
-    return chunks
 
-
-def _split_large_chunk(chunk: Chunk, max_chunk_size: int) -> List[Chunk]:
-    """Split a chunk that exceeds max_chunk_size into smaller pieces.
-
-    Args:
-        chunk: The chunk to split.
-        max_chunk_size: Maximum chunk size in characters.
-
-    Returns:
-        List of smaller chunks with overlap.
-    """
-    chunks: List[Chunk] = []
-    lines = chunk.content.splitlines(keepends=True)
-
-    current_text = ""
-    current_start = chunk.first_character_index
-
-    for line in lines:
-        if len(current_text) + len(line) > max_chunk_size and current_text:
-            chunks.append(Chunk(
-                file_path=chunk.file_path,
-                content=current_text,
-                first_character_index=current_start,
-                last_character_index=current_start + len(current_text)
-            ))
-            current_start += len(current_text)
-            current_text = line
-        else:
-            current_text += line
-
-    # On n'oublie pas le dernier morceau
-    if current_text:
-        chunks.append(Chunk(
-            file_path=chunk.file_path,
-            content=current_text,
-            first_character_index=current_start,
-            last_character_index=current_start + len(current_text)
-        ))
+    if not chunks and content.strip():
+        chunks = _split_oversized(
+            file_path,
+            content,
+            0,
+            len(content),
+            max_chunk_size
+        )
 
     return chunks
