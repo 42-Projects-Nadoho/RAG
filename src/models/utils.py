@@ -38,3 +38,37 @@ class TerminalColors(BaseModel):
     ENDC: str = '\033[0m'
     BOLD: str = '\033[1m'
     UNDERLINE: str = '\033[4m'
+
+    @staticmethod
+    def info(message: str) -> None:
+        """
+        Print an informational message in bold cyan.
+        """
+        print(f"{TerminalColors.BOLD}{TerminalColors.OKCYAN}"
+              f"[INFO] {message}{TerminalColors.ENDC}"
+             )
+
+    @staticmethod
+    def success(message: str) -> None:
+        """
+        Print a success message in bold green.
+        """
+        print(f"{TerminalColors.BOLD}{TerminalColors.OKGREEN}"
+              f" [SUCCESS] {message}{TerminalColors.ENDC}"
+             )
+
+    @staticmethod
+    def warning(message: str) -> None:
+        """
+        Print a warning message in bold yellow.
+        """
+        print(f"{TerminalColors.BOLD}{TerminalColors.WARNING}"
+              f" [WARNING] {message}{TerminalColors.ENDC}"
+             )
+
+    @staticmethod
+    def error(message: str) -> None:
+        """Print an error message in bold red."""
+        print(f"{TerminalColors.BOLD}{TerminalColors.FAIL}"
+              f" [ERROR] {message}{TerminalColors.ENDC}"
+             )
