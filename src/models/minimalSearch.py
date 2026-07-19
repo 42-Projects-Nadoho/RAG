@@ -14,6 +14,7 @@ class MinimalSearchResults(BaseModel):
 
     question_id: str | None = Field(default_factory=lambda: str(uuid.uuid4()))
     question: str
+    question_str: str
     retrieved_sources: list[MinimalSource]
 
     def model_post_init(self, _: object) -> None:

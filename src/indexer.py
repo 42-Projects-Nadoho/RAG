@@ -1,9 +1,10 @@
+import re
 import math
 import pickle
 from pathlib import Path
 from typing import List, Dict
 from pydantic import BaseModel
-from src.chuncker import chunk_markdown, chunk_python, Chunk
+from src.chunker import chunk_markdown, chunk_python, Chunk
 
 
 class BM25Index(BaseModel):
@@ -35,7 +36,7 @@ class CodebaseIndexer(BaseModel):
         Returns:
             A list of lowercased tokens.
         """
-        return text.lower().split()
+        return re.findall(r'\w+', text.lower())
 
     def build_index(self, raw_data_dir: str) -> BM25Index:
         """Scan the raw directory, chunk discovered files,
@@ -78,6 +79,9 @@ class CodebaseIndexer(BaseModel):
 
         for chunk in all_chunks:
             tokens = self._tokenize(chunk.content)
+            file_stem = Path(chunk.file_path).stem.replace('_', ' ').replace('-', ' ')
+            filename_tokens = self._tokenize(file_stem)
+            tokens.extend(filename_tokens * 5)
             doc_lengths.append(len(tokens))
 
             tf: Dict[str, int] = {}
