@@ -44,10 +44,10 @@ add: setup-venv
 	uv add $(ARGS)
 
 run: install
-	uv run -m $(MAIN) $(ARGS)
+	uv run python3 -m $(MAIN) $(ARGS)
 
 debug: install
-	uv run -m $(MAIN) $(ARGS)
+	uv run python3 -m pdb -m $(MAIN) $(ARGS)
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
