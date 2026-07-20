@@ -7,11 +7,15 @@ It satisfies the 'Answer generation' requirement of the project subject.
 """
 
 import torch
-from typing import List
+from typing import List, cast, Any
 from pydantic import BaseModel
 from src.models.utils import TerminalColors
 from src.models.minimalSource import MinimalSource
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig
+)
 
 
 class RagGenerator(BaseModel):
@@ -35,6 +39,14 @@ class RagGenerator(BaseModel):
     tokenizer: AutoTokenizer | None = None
     model: AutoModelForCausalLM | None = None
 
+    @staticmethod
+    def create_bnb_config() -> Any:
+        bnb_config_class: Any = BitsAndBytesConfig
+        return bnb_config_class(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype="float16"
+        )
+
     def load_model(self) -> None:
         """
         Load the LLM and tokenizer into memory.
@@ -45,11 +57,18 @@ class RagGenerator(BaseModel):
         """
         TerminalColors.info(f"Loading the LLM : {self.model_name}...")
 
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.model_name,
-            torch_dtype=torch.float16,
-            device_map="auto"
+        self.tokenizer = cast(
+            AutoTokenizer,
+            AutoTokenizer.from_pretrained(self.model_name)
+        )
+        quantization_config = self.create_bnb_config()
+        self.model = cast(
+            AutoModelForCausalLM,
+            AutoModelForCausalLM.from_pretrained(
+                self.model_name,
+                quantization_config=quantization_config,
+                low_cpu_mem_usage=True
+            )
         )
 
         TerminalColors.success("Modèle chargé avec succès.")
@@ -113,8 +132,9 @@ class RagGenerator(BaseModel):
                 "content": (
                     "You are a strict technical assistant. Answer the "
                     "question using ONLY the provided context. "
+                    "Be extremely concise (1 or 2 sentences maximum). "
                     "If the context does not contain the answer, "
-                    "reply with 'I don't know'."
+                    "reply EXACTLY with 'I don't know'."
                 )
             },
             {
@@ -123,12 +143,18 @@ class RagGenerator(BaseModel):
             }
         ]
 
-        prompt = self.tokenizer.apply_chat_template(
+        tokenizer = cast(Any, self.tokenizer)
+        prompt = tokenizer.apply_chat_template(
             messages,
             tokenize=False,
             add_generation_prompt=True
         )
-        return prompt
+
+        prompt += """
+<think>\nContext analyzed. Generating final concise answer.\n</think>\n\n
+        """
+
+        return str(prompt)
 
     def answer(self,
                question: str,
@@ -154,30 +180,45 @@ class RagGenerator(BaseModel):
             ValueError: If the model or tokenizer has not been loaded before
                 calling.
         """
-        if not self.model or not self.tokenizer:
+        if self.tokenizer is None or self.model is None:
             raise ValueError(
-                "Le modèle n'est pas chargé. Appelle load_model() en premier."
+                "Model and Tokenizer must be loaded before usage."
             )
 
+        tokenizer = cast(Any, self.tokenizer)
+        model = cast(Any, self.model)
         prompt = self.build_prompt(question, sources)
 
-        inputs = self.tokenizer(
+        inputs = tokenizer(
             prompt,
             return_tensors="pt"
-        ).to(self.model.device)
+        ).to(model.device)
 
         with torch.no_grad():
-            outputs = self.model.generate(
+            outputs = model.generate(
                 **inputs,
-                max_new_tokens=max_tokens
-                # temperature=0.1
+                max_new_tokens=max_tokens,
+                temperature=0.1,
+                do_sample=False
             )
 
-        input_length = inputs.input_ids.shape[1]
+        input_length: int = int(inputs.input_ids.shape[1])
         generated_tokens = outputs[0][input_length:]
 
-        answer_text = self.tokenizer.decode(
+        answer_text: str = str(tokenizer.decode(
             generated_tokens,
             skip_special_tokens=True
-        )
-        return answer_text.strip()
+        ))
+        import re
+        answer_text = re.sub(
+            r'<think>.*?</think>', '', answer_text, flags=re.DOTALL
+        ).strip()
+        answer_text = answer_text.replace(
+            '<think>',
+            ''
+        ).replace('</think>', '').strip()
+
+        if not answer_text:
+            return "I don't know."
+
+        return answer_text

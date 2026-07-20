@@ -79,7 +79,8 @@ class CodebaseIndexer(BaseModel):
 
         for chunk in all_chunks:
             tokens = self._tokenize(chunk.content)
-            file_stem = Path(chunk.file_path).stem.replace('_', ' ').replace('-', ' ')
+            file_stem = Path(chunk.file_path).stem.replace('_', ' ')
+            file_stem = file_stem.replace('-', ' ')
             filename_tokens = self._tokenize(file_stem)
             tokens.extend(filename_tokens * 5)
             doc_lengths.append(len(tokens))
