@@ -2,7 +2,8 @@
 Main entry point for the RAG against the machine project.
 
 This module defines the CLI application using Python Fire, exposing
-the required commands for indexing, searching, and generating answers.
+the required commands for indexing, searching, evaluating,
+and generating answers.
 """
 
 import os
@@ -28,7 +29,7 @@ class RagPipeline:
 
     This class exposes methods that are transformed into command-line
     interfaces by the python-fire library. It covers the full pipeline
-    from document indexing to answer generation.
+    from document indexing to answer generation and evaluation.
     """
 
     def index(self, max_chunk_size: int = 2000) -> None:
@@ -44,7 +45,7 @@ class RagPipeline:
         index_path = os.path.join(processed_dir, "bm25_index.pkl")
 
         TerminalColors.info(
-            f"Indexing {raw_dir} with chunk size {max_chunk_size}..."
+            f"[INFO] Indexing {raw_dir} with chunk size {max_chunk_size}..."
         )
         indexer = CodebaseIndexer(max_chunk_size=max_chunk_size)
         bm25_index = indexer.build_index(raw_dir)
@@ -67,14 +68,18 @@ class RagPipeline:
             f"Searching for top {k} sources for query: '{query}'"
         )
         retriever = CodebaseRetriever()
-        retriever.load_index(index_path)
+
+        try:
+            retriever.load_index(index_path)
+        except Exception as e:
+            TerminalColors.error(f"[ERROR] Failed to load index: {e}")
+            return
 
         results = retriever.search(query, k)
 
         output = MinimalSearchResults(
             question_id="test-id",
             question=query,
-            question_str=query,
             retrieved_sources=results
         )
         print(output.model_dump_json(indent=2))
@@ -86,25 +91,24 @@ class RagPipeline:
         """
         Run search over a whole dataset and write a StudentSearchResults
         JSON file.
-
-        Args:
-            dataset_path (str): Path to the JSON dataset containing questions.
-            k (int): Number of sources to retrieve per question.
-            save_directory (str): Directory where the output JSON will be
-                saved.
         """
         index_path = "data/processed/bm25_index.pkl"
 
         TerminalColors.info(f"Loading index from {index_path}...")
         retriever = CodebaseRetriever()
-        retriever.load_index(index_path)
+
+        try:
+            retriever.load_index(index_path)
+        except Exception as e:
+            TerminalColors.error(f"[ERROR] Failed to load index: {e}")
+            return
 
         try:
             with open(dataset_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             dataset = RagDataset(**data)
         except Exception as e:
-            TerminalColors.error(f"Failed to load dataset: {e}")
+            TerminalColors.error(f"[ERROR] Failed to load dataset: {e}")
             return
 
         search_results_list = []
@@ -115,7 +119,6 @@ class RagPipeline:
                 MinimalSearchResults(
                     question_id=item.question_id,
                     question=item.question,
-                    question_str=item.question,
                     retrieved_sources=sources
                 )
             )
@@ -140,16 +143,18 @@ class RagPipeline:
     def answer(self, query: str, k: int = 5) -> None:
         """
         Test the full pipeline (Search + Generation) for a single query.
-
-        Args:
-            query (str): The question to answer.
-            k (int, optional): Number of sources to retrieve. Defaults to 5.
         """
         index_path = "data/processed/bm25_index.pkl"
 
         TerminalColors.info(f"Searching top {k} sources...")
         retriever = CodebaseRetriever()
-        retriever.load_index(index_path)
+
+        try:
+            retriever.load_index(index_path)
+        except Exception as e:
+            TerminalColors.error(f"[ERROR] Failed to load index: {e}")
+            return
+
         sources = retriever.search(query, k)
 
         TerminalColors.info("Generating answer...")
@@ -168,15 +173,6 @@ class RagPipeline:
                        save_directory: str) -> None:
         """
         Read a StudentSearchResults JSON, generate answers, and save results.
-
-        Outputs a StudentSearchResultsAndAnswer JSON file formatted
-            for evaluation.
-
-        Args:
-            student_search_results_path (str): Path to the retrieval
-                results JSON.
-            save_directory (str): Directory where the output JSON
-                will be saved.
         """
         try:
             with open(student_search_results_path,
@@ -202,7 +198,6 @@ class RagPipeline:
                 MinimalAnswer(
                     question_id=item.question_id,
                     question=item.question,
-                    question_str=item.question_str,
                     retrieved_sources=item.retrieved_sources,
                     answer=answer_text
                 )
@@ -223,6 +218,101 @@ class RagPipeline:
 
         TerminalColors.success(f"Saved student_answers to {full_out_path}")
 
+    def _calculate_iou(self,
+                       start1: int,
+                       end1: int,
+                       start2: int,
+                       end2: int) -> float:
+        """
+        Calculate the Intersection over Union (IoU) of two character spans.
+        """
+        intersection = max(0, min(end1, end2) - max(start1, start2))
+        length1 = end1 - start1
+        length2 = end2 - start2
+        union = length1 + length2 - intersection
+        return intersection / union if union > 0 else 0.0
+
+    def evaluate(self,
+                 student_search_results_path: str,
+                 dataset_path: str) -> None:
+        """
+        Report recall@k against a ground-truth dataset, using the k
+        stored in the student results file.
+        """
+        TerminalColors.info(
+            "Evaluating search results against ground truth..."
+            )
+
+        try:
+            with open(student_search_results_path, "r", encoding="utf-8") as f:
+                student_data = json.load(f)
+            student_results = StudentSearchResults(**student_data)
+
+            k = student_results.k
+            TerminalColors.info(
+                f"Using k={k} from student results for evaluation."
+            )
+
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                truth_data = json.load(f)
+            truth_dataset = RagDataset(**truth_data)
+        except Exception as e:
+            TerminalColors.error(f"Failed to load files for evaluation: {e}")
+            return
+
+        truth_dict = {
+            q.question_id: getattr(q, 'sources', [])
+            for q in truth_dataset.rag_questions
+        }
+
+        total_recall = 0.0
+        valid_questions = 0
+
+        for student_q in student_results.search_results:
+            q_id = student_q.question_id
+            if q_id not in truth_dict or not truth_dict[q_id]:
+                continue
+
+            true_sources = truth_dict[q_id]
+            hits = 0
+            top_k_retrieved = student_q.retrieved_sources[:k]
+
+            for expected_src in true_sources:
+                found = False
+                for retrieved_src in top_k_retrieved:
+                    if retrieved_src.file_path == expected_src.file_path:
+                        iou = self._calculate_iou(
+                            retrieved_src.first_character_index,
+                            retrieved_src.last_character_index,
+                            expected_src.first_character_index,
+                            expected_src.last_character_index
+                        )
+                        if iou >= 0.05:
+                            found = True
+                            break
+                if found:
+                    hits += 1
+
+            if len(true_sources) > 0:
+                question_recall = hits / len(true_sources)
+                total_recall += question_recall
+                valid_questions += 1
+
+        if valid_questions == 0:
+            TerminalColors.warning(
+                "No matching questions found between results and ground truth."
+            )
+            return
+
+        average_recall = total_recall / valid_questions
+
+        print("\n" + "="*40)
+        TerminalColors.success("EVALUATION RESULTS")
+        print("="*40)
+        TerminalColors.info(f"Questions evaluated : {valid_questions}")
+        TerminalColors.info(f"Recall@{k} : {average_recall:.3f}")
+        print("="*40 + "\n")
+
 
 def main() -> None:
     """
@@ -230,8 +320,11 @@ def main() -> None:
     """
     fire.Fire(RagPipeline)
 
+
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        TerminalColors.error("[ERROR] Keybord intrruption was detected")
+        TerminalColors.error(
+            "\n[ERROR] Keyboard interruption was detected."
+        )
