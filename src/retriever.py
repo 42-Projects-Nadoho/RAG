@@ -22,16 +22,15 @@ class CodebaseRetriever(BaseModel):
                 data = pickle.load(f)
                 self.index = BM25Index(**data)
             TerminalColors.success(
-                f"[INFO] Index successfully loaded from {index_path}"
+                f"Index successfully loaded from {index_path}"
             )
         except (
                 FileNotFoundError,
                 EOFError,
                 pickle.UnpicklingError) as e:
-            TerminalColors.error(
-                f"[ERROR] Failed to load index from {index_path}: {e}"
-            )
-            self.index = None
+            raise RuntimeError(
+                f"File '{index_path}' not found or corrupted."
+            ) from e
 
     def search(self, query: str, k: int) -> List[MinimalSource]:
         """
