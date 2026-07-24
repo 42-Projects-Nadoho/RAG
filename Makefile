@@ -17,7 +17,7 @@ V_PYTHON		= $(VENV_BIN)/python
 MYPY_FLAGS		= --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 FLAKE			= $(VENV_BIN)/flake8
 MYPY			= $(VENV_BIN)/mypy
-EXCLUDE			= $(VENV),data/raw/,vllm-0.10.1/
+EXCLUDE			= $(VENV),data/raw/
 ARGS ?=
 
 all: run

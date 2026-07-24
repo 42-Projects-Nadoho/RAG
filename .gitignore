@@ -1,4 +1,13 @@
-#Virtuals env
+#Virtuals ennv
 .venv
-__pycache__
+
+# Configuration files
 .vscode/
+
+#Caches files
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+
+#Generate and processed data
+data

@@ -4,6 +4,8 @@ from typing import List, Optional
 from pydantic import BaseModel
 from src.indexer import BM25Index
 from src.models.minimalSource import MinimalSource
+from src.models.utils import TerminalColors
+
 
 class CodebaseRetriever(BaseModel):
     """
@@ -18,19 +20,36 @@ class CodebaseRetriever(BaseModel):
         try:
             with open(index_path, "rb") as f:
                 data = pickle.load(f)
-                # Reconstruire l'objet Pydantic à partir du dictionnaire désérialisé
                 self.index = BM25Index(**data)
-            print(f"[INFO] Index successfully loaded from {index_path}")
-        except (FileNotFoundError, EOFError, pickle.UnpicklingError) as e:
-            print(f"[ERROR] Failed to load index from {index_path}: {e}")
-            self.index = None
+            TerminalColors.success(
+                f"Index successfully loaded from {index_path}"
+            )
+        except (
+                FileNotFoundError,
+                EOFError,
+                pickle.UnpicklingError) as e:
+            raise RuntimeError(
+                f"File '{index_path}' not found or corrupted."
+            ) from e
 
     def search(self, query: str, k: int) -> List[MinimalSource]:
         """
         Score all chunks against the query and return the top-k sources.
         """
+        if not query or not query.strip():
+            TerminalColors.warning(
+                "[WARNING] Empty query received. Returning no sources."
+            )
+            return []
+        if k <= 0:
+            TerminalColors.warning(
+                f"[WARNING] Requested k={k} is invalid. Returning no sources."
+            )
+            return []
         if self.index is None:
-            raise ValueError("Index is not loaded. Please call load_index() first.")
+            raise ValueError(
+                "Index is not loaded. Please call load_index() first."
+            )
 
         query_tokens = re.findall(r'\w+', query.lower())
 
@@ -50,7 +69,9 @@ class CodebaseRetriever(BaseModel):
 
                 idf = self.index.idf[token]
                 numerator = tf * (self.k1 + 1)
-                denominator = tf + self.k1 * (1 - self.b + self.b * (doc_len / self.index.avg_doc_len))
+                doc_base = doc_len / self.index.avg_doc_len
+                doc_factor = 1 - self.b + self.b * doc_base
+                denominator = tf + self.k1 * doc_factor
 
                 score += idf * (numerator / denominator)
 
