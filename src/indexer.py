@@ -1,6 +1,7 @@
 import re
 import math
 import pickle
+from tqdm import tqdm
 from pathlib import Path
 from typing import List, Dict
 from pydantic import BaseModel
@@ -59,9 +60,8 @@ class CodebaseIndexer(BaseModel):
             )
 
         file_list = list(raw_path.rglob("*"))
-        print(f"Ingesting files from {raw_data_dir}...")
 
-        for p in file_list:
+        for p in tqdm(file_list, desc="Chunking", unit="file"):
             if p.is_file():
                 if p.suffix == ".py":
                     all_chunks.extend(
@@ -77,7 +77,7 @@ class CodebaseIndexer(BaseModel):
         df: Dict[str, int] = {}
         total_docs = len(all_chunks)
 
-        for chunk in all_chunks:
+        for chunk in tqdm(all_chunks, desc="Tokenizing", unit="chunk"):
             tokens = self._tokenize(chunk.content)
             file_stem = Path(chunk.file_path).stem.replace('_', ' ')
             file_stem = file_stem.replace('-', ' ')
