@@ -21,3 +21,6 @@ dependencies = [
 dev = [
     "types-tqdm>=4.69.0.20260724",
 ]
+
+[tool.mypy]
+mypy_path = "stubs"

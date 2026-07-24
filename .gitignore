@@ -1,5 +1,6 @@
-#Virtuals ennv
+#Virtuals env and files
 .venv
+.env
 
 # Configuration files
 .vscode/
@@ -9,5 +10,6 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 
-#Generate and processed data
+#Generate, processed and subject data
 data
+moulinette*

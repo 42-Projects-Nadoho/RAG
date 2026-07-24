@@ -5,7 +5,19 @@ from pydantic import BaseModel
 
 class Chunk(BaseModel):
     """
-    Represents a chunk of text from a file with strict character offsets.
+    Represents a contiguous segment of text extracted from a source file.
+
+    This model maintains strict character-level positional tracking to allow
+    precise mapping of the extracted content back to the original document.
+
+    Attributes:
+        file_path (str): The relative or absolute path to the original
+            source file.
+        content (str): The actual text content contained within this chunk.
+        first_character_index (int): The starting character offset of the chunk
+            in the original file (inclusive).
+        last_character_index (int): The ending character offset of the chunk
+            in the original file (exclusive).
     """
 
     file_path: str
@@ -35,11 +47,20 @@ def _split_oversized(file_path: str,
         )]
 
     overlap = max_chunk_size // 10
-    step = max_chunk_size - overlap
     pos = start
 
     while pos < end:
         sub_end = min(pos + max_chunk_size, end)
+
+        if sub_end < end:
+            last_newline = content.rfind('\n', pos, sub_end)
+            last_space = content.rfind(' ', pos, sub_end)
+
+            break_point = last_newline if last_newline != -1 else last_space
+
+            if break_point > pos + (max_chunk_size // 2):
+                sub_end = break_point
+
         chunks.append(Chunk(
             file_path=file_path,
             content=content[pos:sub_end],
@@ -48,7 +69,8 @@ def _split_oversized(file_path: str,
         ))
         if sub_end >= end:
             break
-        pos += step
+
+        pos = sub_end - overlap
 
     return chunks
 
@@ -135,18 +157,36 @@ def chunk_python(file_path: str, max_chunk_size: int = 2000) -> List[Chunk]:
     for line in lines:
         line_starts.append(line_starts[-1] + len(line))
 
-    top_level = [
-        node for node in tree.body
-        if isinstance(
-            node,
-            (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        )
-    ]
+    target_nodes: List[ast.stmt] = []
 
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            target_nodes.append(node)
+        elif isinstance(node, ast.ClassDef):
+            if node.end_lineno is None:
+                continue
+
+            class_start = line_starts[node.lineno - 1]
+            class_end = line_starts[node.end_lineno]
+
+            if (class_end - class_start) <= max_chunk_size:
+                target_nodes.append(node)
+            else:
+                for sub_node in node.body:
+                    if isinstance(
+                            sub_node, (
+                                ast.FunctionDef,
+                                ast.AsyncFunctionDef,
+                                ast.ClassDef
+                                )
+                            ):
+                        target_nodes.append(sub_node)
+
+    target_nodes.sort(key=lambda x: x.lineno)
     chunks: List[Chunk] = []
     cursor = 0
 
-    for node in top_level:
+    for node in target_nodes:
         if node.end_lineno is None:
             continue
 

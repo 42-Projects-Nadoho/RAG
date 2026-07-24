@@ -1,0 +1,3 @@
+from typing import Any
+
+def Fire(component: Any = ..., command: Any = ...) -> None: ...

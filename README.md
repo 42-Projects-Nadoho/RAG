@@ -92,10 +92,8 @@ returned as ranked source locations (`file_path`,
 | Metric | Measurement | Target |
 |---|---|---|
 | **Indexing time (Full corpus)** | `<TODO>s` | < 300s (5 min) |
-| **Retrieval time (200 queries)** | `<TODO>s` | < 90s |
+| **Retrieval time (200 queries)** | `10.46` | < 90s |
 | **Generation time (per answer)** | `<TODO>s` | - |
-| **Index File Size on Disk** | `<TODO> MB` | - |
-| **Peak RAM Usage (Indexing)** | `<TODO> MB` | - |
 
 ### 3. Ablation Study: Impact of Chunk Size
 *Comparing how chunk size affects Recall@5.*

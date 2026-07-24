@@ -9,7 +9,14 @@ from src.models.utils import TerminalColors
 
 
 class RagEvaluator:
-    """Evaluates student search results against ground-truth datasets."""
+    """
+    Utility class for evaluating the RAG pipeline's retrieval performance.
+
+    This class compares the sources retrieved by the search pipeline against
+    a ground-truth dataset. It calculates the Recall@K metric by measuring
+    the Intersection over Union (IoU) of the character spans, determining
+    if a retrieved source correctly matches an expected source.
+    """
 
     @staticmethod
     def _calculate_iou(
@@ -17,6 +24,20 @@ class RagEvaluator:
     ) -> float:
         """
         Calculate the Intersection over Union (IoU) of two character spans.
+
+        This metric determines how much two text segments overlap relative to
+        their combined total length. It is used to verify if a retrieved
+        chunk accurately covers the expected ground-truth context.
+
+        Args:
+            start1 (int): The starting character index of the first span.
+            end1 (int): The ending character index of the first span.
+            start2 (int): The starting character index of the second span.
+            end2 (int): The ending character index of the second span.
+
+        Returns:
+            float: The IoU ratio, ranging from 0.0 (no overlap) to 1.0
+                (exact match).
         """
         intersection = max(0, min(end1, end2) - max(start1, start2))
         length1 = end1 - start1
@@ -28,7 +49,18 @@ class RagEvaluator:
     def evaluate(cls,
                  student_search_results_path: str,
                  dataset_path: str) -> None:
-        """Report recall@k against a ground-truth dataset."""
+        """
+        Report Recall@K against a ground-truth dataset.
+
+        Loads the student's search results and the expected ground-truth
+        answers, calculates the hit rate based on an IoU threshold (>= 0.05),
+        and prints the final average recall score to the terminal.
+
+        Args:
+            student_search_results_path (str): Path to the JSON file containing
+                the retrieved sources to evaluate.
+            dataset_path (str): Path to the ground-truth JSON dataset.
+        """
         TerminalColors.info(
             "Evaluating search results against ground truth..."
         )

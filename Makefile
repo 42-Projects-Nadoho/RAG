@@ -17,11 +17,9 @@ V_PYTHON		= $(VENV_BIN)/python
 MYPY_FLAGS		= --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 FLAKE			= $(VENV_BIN)/flake8
 MYPY			= $(VENV_BIN)/mypy
-EXCLUDE			= $(VENV),data/raw/
 ARGS ?=
 
 all: run
-
 
 setup-venv:
 	@if [ "$(HAS_SGOINFRE)" = "yes" ]; then \
@@ -29,6 +27,8 @@ setup-venv:
 			echo "[INFO] Cluster 42 détecté : Création du lien symbolique vers le sgoinfre..."; \
 			mkdir -p $(VENV_TARGET); \
 			ln -s $(VENV_TARGET) $(VENV); \
+			echo "HF_HOME=/sgoinfre/goinfre/Perso/$(USER_NAME)/hf-cache" > .env; \
+			echo "UV_LINK_MODE=copy" >> .env; \
 		fi \
 	else \
 		if [ ! -d $(VENV) ]; then \
@@ -56,11 +56,11 @@ clean:
 	@if [ -L $(VENV) ]; then rm -f $(VENV); else rm -rf $(VENV); fi
 
 lint: install
-	$(FLAKE) . --exclude $(EXCLUDE)
-	$(MYPY) --exclude $(EXCLUDE) $(MYPY_FLAGS) src
+	$(FLAKE) .
+	$(MYPY) $(MYPY_FLAGS) .
 
 lint-strict: install
-	$(FLAKE) . --exclude $(EXCLUDE)
-	$(MYPY) --exclude $(EXCLUDE) $(MYPY_FLAGS) --strict src
+	$(FLAKE) .
+	$(MYPY) --strict .
 
 .PHONY: all install run debug clean lint lint-strict setup-venv

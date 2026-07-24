@@ -27,10 +27,32 @@ from src.models.student import (
 class RagPipeline:
     """
     Core orchestration class for the RAG against the machine project.
+
+    This class acts as the main entry point for the Command Line Interface
+        (CLI).
+    It connects the distinct modules of the pipeline (Indexing, Retrieval,
+    Generation, and Evaluation), handles file I/O, catches critical
+        exceptions,
+    and validates incoming/outgoing data using strict Pydantic schemas.
     """
 
     def index(self, max_chunk_size: int = 2000) -> None:
-        """Ingest raw data and build the BM25 index."""
+        """
+        Ingest raw data and build the BM25 index.
+
+        Initializes the CodebaseIndexer to parse the raw vLLM source code,
+        chunks the files according to the specified size constraint, computes
+        the BM25 statistics, and serializes the result to a pickle file.
+
+        Args:
+            max_chunk_size (int, optional): The maximum allowed length
+                (in characters) for each extracted chunk. Defaults to 2000.
+        """
+
+        if max_chunk_size > 2000 or max_chunk_size <= 0:
+            TerminalColors.error(f"Invalid chunk_size : {max_chunk_size}")
+            return
+
         raw_dir = "data/raw/vllm-0.10.1"
         processed_dir = "data/processed"
         index_path = os.path.join(processed_dir, "bm25_index.pkl")
@@ -42,6 +64,10 @@ class RagPipeline:
         try:
             indexer = CodebaseIndexer(max_chunk_size=max_chunk_size)
             bm25_index = indexer.build_index(raw_dir)
+
+            if bm25_index is None:
+                TerminalColors.error("Index building failed (returned None).")
+                return
         except Exception as e:
             TerminalColors.error(
                 f"A critical error occurred during indexing: {e}"
@@ -51,7 +77,8 @@ class RagPipeline:
         try:
             indexer.save_index(bm25_index, index_path)
             TerminalColors.success(
-                "Ingestion complete! Indices saved under data/processed/"
+                f"Ingestion complete! Indexed {len(bm25_index.chunks)} "
+                f"chunks under {processed_dir}/"
             )
         except PermissionError:
             TerminalColors.error(
@@ -66,8 +93,22 @@ class RagPipeline:
             )
 
     def search(self, query: str, k: int) -> None:
-        """Return the top-k sources for a single query."""
+        """
+        Return and print the top-k sources for a single query.
+
+        Loads the pre-computed BM25 index from disk and queries it. This
+        method is primarily used for quick debugging and testing the retrieval
+        accuracy in the terminal without needing a full dataset.
+
+        Args:
+            query (str): The search query provided by the user.
+            k (int): The number of top-scoring sources to retrieve.
+        """
         index_path = "data/processed/bm25_index.pkl"
+        if k <= 0:
+            TerminalColors.error(f"Value of k : {k} is invalid")
+            return
+
         TerminalColors.info(
             f"Searching for top {k} sources for query: '{query}'"
         )
@@ -99,7 +140,24 @@ class RagPipeline:
                        dataset_path: str,
                        k: int,
                        save_directory: str) -> None:
-        """Run search over a dataset and write a StudentSearchResults JSON."""
+        """
+        Run search over a dataset and write a StudentSearchResults JSON.
+
+        Loads a raw dataset, iterates over all questions, retrieves the top-k
+        sources for each, and exports the results to a cleanly formatted JSON
+        file that complies with the moulinette's expected schema.
+
+        Args:
+            dataset_path (str): Path to the input JSON dataset
+                (e.g., UnansweredQuestions).
+            k (int): The number of top sources to retrieve per question.
+            save_directory (str): The output directory where the results
+                JSON will be saved.
+        """
+        if k <= 0:
+            TerminalColors.error(f"Value of k : {k} is invalid")
+            return
+
         index_path = "data/processed/bm25_index.pkl"
         TerminalColors.info(f"Loading index from {index_path}...")
         retriever = CodebaseRetriever()
@@ -179,7 +237,18 @@ class RagPipeline:
             TerminalColors.error(f"System error while saving results: {e}")
 
     def answer(self, query: str, k: int = 5) -> None:
-        """Test the full pipeline for a single query."""
+        """
+        Test the full end-to-end pipeline for a single query.
+
+        Performs both the retrieval phase (finding top-k sources) and the
+        generation phase (prompting the LLM) for a single input query,
+        printing the final generated answer directly to the terminal.
+
+        Args:
+            query (str): The user's question to answer.
+            k (int, optional): The number of sources to retrieve.
+                Defaults to 5.
+        """
         index_path = "data/processed/bm25_index.pkl"
         retriever = CodebaseRetriever()
 
@@ -216,8 +285,20 @@ class RagPipeline:
     def answer_dataset(self,
                        student_search_results_path: str,
                        save_directory: str) -> None:
-        """Generate answers from a StudentSearchResults JSON."""
-        batch_size: int = 32
+        """
+        Generate answers from a StudentSearchResults JSON.
+
+        Takes the output file produced by `search_dataset`, loads the local
+        LLM, and sequentially generates a short answer for every question
+        based on its previously retrieved sources. Saves the final output
+        as a new JSON file.
+
+        Args:
+            student_search_results_path (str): Path to the intermediate JSON
+                file containing the questions and their retrieved sources.
+            save_directory (str): The output directory where the final JSON
+                with answers will be saved.
+        """
         try:
             with open(student_search_results_path,
                       "r", encoding="utf-8") as f:
@@ -257,33 +338,23 @@ class RagPipeline:
             TerminalColors.error(f"Failed to load the generation model: {e}")
             return
 
-        questions = [item.question for item in search_data.search_results]
-        sources_list = [
-            item.retrieved_sources for item in search_data.search_results
-        ]
+        answer_texts = []
+        for item in tqdm(
+                search_data.search_results,
+                desc="Génération des réponses", unit="q"):
+            try:
 
-        try:
-            answer_texts = generator.answer_batch(
-                questions, sources_list, batch_size=batch_size
-            )
-        except Exception as e:
-            TerminalColors.error(f"Batch generation failed: {e}")
-            TerminalColors.warning(
-                "Falling back to sequential generation for this run."
-            )
-            answer_texts = []
-            for item in tqdm(search_data.search_results,
-                             desc="Generating answers (fallback)"):
-                try:
-                    answer_texts.append(
-                        generator.answer(item.question, item.retrieved_sources)
-                    )
-                except Exception as item_error:
-                    TerminalColors.error(
-                        "\nFailed to generate answer for query "
-                        f"'{item.question_id}': {item_error}"
-                    )
-                    answer_texts.append("Generation error.")
+                answer_text = generator.answer(
+                    item.question,
+                    item.retrieved_sources
+                )
+                answer_texts.append(answer_text)
+            except Exception as item_error:
+                TerminalColors.error(
+                    "\nFailed to generate answer for query "
+                    f"'{item.question_id}': {item_error}"
+                )
+                answer_texts.append("Generation error.")
 
         answers_list: List[MinimalAnswer] = [
             MinimalAnswer(
@@ -292,7 +363,8 @@ class RagPipeline:
                 retrieved_sources=item.retrieved_sources,
                 answer=answer_text
             )
-            for item, answer_text in zip(search_data.search_results, answer_texts)
+            for item, answer_text in zip(
+                search_data.search_results, answer_texts)
         ]
 
         final_answers = StudentSearchResultsAndAnswer(
@@ -318,7 +390,18 @@ class RagPipeline:
     def evaluate(self,
                  student_search_results_path: str,
                  dataset_path: str) -> None:
-        """Delegate evaluation to the RagEvaluator module."""
+        """
+        Delegate evaluation to the RagEvaluator module.
+
+        Compares the student's retrieved sources against a ground-truth
+        dataset to compute and print the Recall@K metric.
+
+        Args:
+            student_search_results_path (str): Path to the student's search
+                results JSON.
+            dataset_path (str): Path to the ground-truth JSON dataset
+                (AnsweredQuestions).
+        """
         try:
             RagEvaluator.evaluate(student_search_results_path, dataset_path)
         except Exception as e:

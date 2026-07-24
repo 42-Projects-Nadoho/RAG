@@ -11,6 +11,24 @@ from src.chunker import chunk_markdown, chunk_python, Chunk
 class BM25Index(BaseModel):
     """
     Persistence model containing all the data structures for the BM25 index.
+
+    This Pydantic model encapsulates the pre-computed Okapi BM25 statistics
+    and the chunk metadata. It serves as the single source of truth for
+    the retrieval phase and is easily serializable for disk storage.
+
+    Attributes:
+        chunks (List[Chunk]): The list of all chunked text segments extracted
+            from the codebase.
+        doc_lengths (List[int]): The token count for each document (chunk),
+            indexed in the exact same order as `chunks`.
+        avg_doc_len (float): The average document length across the entire
+            corpus.
+        df (Dict[str, int]): The Document Frequency (number of documents
+            containing a specific term) for every unique token in the corpus.
+        idf (Dict[str, float]): The pre-calculated Inverse Document Frequency
+            weight for every unique token.
+        doc_term_freqs (List[Dict[str, int]]): The Term Frequency mapping for
+            each individual document/chunk.
     """
 
     chunks: List[Chunk]
@@ -22,42 +40,69 @@ class BM25Index(BaseModel):
 
 
 class CodebaseIndexer(BaseModel):
-    """Pydantic-based indexer to ingest the codebase and build a BM25 index."""
+    """
+    Pydantic-based indexer to ingest the codebase and build a BM25 index.
 
+    Orchestrates the ingestion pipeline by walking the target directory,
+    routing files to the appropriate chunking strategies based on their
+    extensions, and computing the Okapi BM25 lexical statistics for the
+    resulting corpus.
+
+    Attributes:
+        max_chunk_size (int): The hard limit for chunk length in characters.
+        k1 (float): The BM25 term frequency saturation parameter.
+            Controls how quickly the score plateaus for repeated terms.
+        b (float): The BM25 document length normalization parameter.
+            Controls how much long documents are penalized compared to
+            short ones.
+    """
     max_chunk_size: int = 2000
     k1: float = 1.5
     b: float = 0.75
 
     def _tokenize(self, text: str) -> List[str]:
-        """Tokenize input text for lexical analysis using basic splitting.
+        """
+        Tokenize input text for lexical analysis using basic word splitting.
+
+        Strips punctuation and splits the text into lowercase alphanumeric
+        tokens. This normalization ensures consistent term matching between
+        the indexed codebase and the user's queries.
 
         Args:
-            text: The raw string content to process.
+            text (str): The raw string content to process.
 
         Returns:
-            A list of lowercased tokens.
+            List[str]: A list of lowercased alphanumeric tokens.
         """
         return re.findall(r'\w+', text.lower())
 
-    def build_index(self, raw_data_dir: str) -> BM25Index:
-        """Scan the raw directory, chunk discovered files,
-        and compute BM25 statistics.
+    def build_index(self, raw_data_dir: str) -> BM25Index | None:
+        """
+        Scan the raw directory, chunk discovered files, and compute BM25
+        statistics.
+
+        Recursively walks the provided directory, applies AST-based chunking
+        for Python files and section-based chunking for Markdown,
+        then tokenizes the chunks. Artificially augments each chunk's token
+        list with heavily weighted filename tokens to improve retrieval
+        accuracy for identifier-based queries.
 
         Args:
-            raw_data_dir: Path to the raw source code directory.
+            raw_data_dir (str): Path to the root of the raw source code
+                directory.
 
         Returns:
-            A populated BM25Index instance.
+            BM25Index | None: A fully populated BM25Index instance containing
+                all chunks and computed metrics.
+
+        Raises:
+            OSError: If the specified raw data directory does not exist.
         """
         all_chunks: List[Chunk] = []
         raw_path = Path(raw_data_dir)
 
         if not raw_path.exists():
-            print(f"Error: The directory {raw_data_dir} does not exist.")
-            return BM25Index(
-                chunks=[], doc_lengths=[], avg_doc_len=0.0,
-                df={}, idf={}, doc_term_freqs=[]
-            )
+            raise OSError(f"The directory {raw_path}does not exist.")
 
         file_list = list(raw_path.rglob("*"))
 
@@ -114,12 +159,16 @@ class CodebaseIndexer(BaseModel):
         """
         Serialize the complete index structure to a binary file using pickle.
 
+        Uses Python's pickle module for ultra-fast deserialization during the
+        search phase, converting the Pydantic model to a standard dictionary
+        before dumping to minimize load overhead.
+
         Args:
-            index: The BM25Index instance to serialize.
-            output_path: Target path to save the binary payload.
+            index (BM25Index): The populated index instance to serialize.
+            output_path (str): Target path (including filename) to save the
+                binary payload.
         """
         out_p = Path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
         with open(out_p, "wb") as f:
             pickle.dump(index.dict(), f)
-        print(f"Index successfully saved to: {output_path}")
