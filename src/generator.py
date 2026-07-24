@@ -5,7 +5,7 @@ This module provides the RAGGenerator class, which loads a local Large
 Language Model (LLM) to produce answers grounded solely in provided sources.
 It satisfies the 'Answer generation' requirement of the project subject.
 """
-import os
+from tqdm import tqdm
 import torch
 from pathlib import Path
 from typing import List, cast, Any, Dict
@@ -59,6 +59,9 @@ class RagGenerator(BaseModel):
             AutoTokenizer,
             AutoTokenizer.from_pretrained(self.model_name)
         )
+        self.tokenizer.padding_side = "left"
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
         use_cuda = torch.cuda.is_available()
         dtype: Any = torch.float16 if use_cuda else torch.float32
@@ -181,6 +184,13 @@ class RagGenerator(BaseModel):
 
         return str(prompt)
 
+    def _postprocess(self, full_answer: str) -> str:
+            """Clean a raw generated string into the final short answer."""
+            final_answer = full_answer.split('\n')[0].strip()
+            if not final_answer or "don't know" in final_answer.lower() or "do not know" in final_answer.lower():
+                return "I don't know."
+            return final_answer
+
     def answer(self,
                question: str,
                sources: List[MinimalSource],
@@ -192,11 +202,7 @@ class RagGenerator(BaseModel):
             raise ValueError("Model and Tokenizer must be loaded before usage.")
 
         prompt = self.build_prompt(question, sources)
-
-        inputs = self.tokenizer(
-            prompt,
-            return_tensors="pt"
-        ).to(self.model.device)
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
 
         with torch.no_grad():
             outputs = self.model.generate(
@@ -206,19 +212,67 @@ class RagGenerator(BaseModel):
                 pad_token_id=self.tokenizer.eos_token_id
             )
 
-        input_length: int = int(inputs.input_ids.shape[1])
+        input_length = int(inputs.input_ids.shape[1])
         generated_tokens = outputs[0][input_length:]
+        full_answer = str(self.tokenizer.decode(generated_tokens, skip_special_tokens=True)).strip()
+        return self._postprocess(full_answer)
+    
+    def answer_batch(self,
+                      questions: List[str],
+                      sources_list: List[List[MinimalSource]],
+                      max_tokens: int = 35,
+                      batch_size: int = 32) -> List[str]:
+        """
+        Generate answers for many questions at once, batched on GPU.
 
-        full_answer: str = str(self.tokenizer.decode(
-            generated_tokens,
-            skip_special_tokens=True
-        )).strip()
+        Args:
+            questions: List of questions, same order as sources_list.
+            sources_list: Retrieved sources per question.
+            max_tokens: Max new tokens generated per answer.
+            batch_size: Number of prompts processed per generate() call.
 
-        # Post-processing agressif : on ne garde que la première ligne ou première vraie phrase générée
-        final_answer = full_answer.split('\n')[0].strip()
+        Returns:
+            List[str]: Answers in the same order as the input questions.
+        """
+        if self.tokenizer is None or self.model is None:
+            raise ValueError("Model and Tokenizer must be loaded before usage.")
 
-        # Si le modèle essaie de dire qu'il ne sait pas avec d'autres mots, on normalise
-        if not final_answer or "don't know" in final_answer.lower() or "do not know" in final_answer.lower():
-            return "I don't know."
+        prompts = [
+            self.build_prompt(q, srcs)
+            for q, srcs in zip(questions, sources_list)
+        ]
 
-        return final_answer
+        results: List[str] = []
+        num_chunks = (len(prompts) + batch_size - 1) // batch_size
+
+        for start in tqdm(
+            range(0, len(prompts), batch_size),
+            total=num_chunks,
+            desc="Generating answers (batched)"
+        ):
+            chunk = prompts[start: start + batch_size]
+
+            inputs = self.tokenizer(
+                chunk,
+                return_tensors="pt",
+                padding=True
+            ).to(self.model.device)
+
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    do_sample=False,
+                    pad_token_id=self.tokenizer.eos_token_id
+                )
+
+            input_length = int(inputs.input_ids.shape[1])
+            generated_tokens = outputs[:, input_length:]
+
+            for row in generated_tokens:
+                full_answer = str(
+                    self.tokenizer.decode(row, skip_special_tokens=True)
+                ).strip()
+                results.append(self._postprocess(full_answer))
+
+        return results

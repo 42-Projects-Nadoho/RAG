@@ -217,6 +217,7 @@ class RagPipeline:
                        student_search_results_path: str,
                        save_directory: str) -> None:
         """Generate answers from a StudentSearchResults JSON."""
+        batch_size: int = 32
         try:
             with open(student_search_results_path,
                       "r", encoding="utf-8") as f:
@@ -256,29 +257,43 @@ class RagPipeline:
             TerminalColors.error(f"Failed to load the generation model: {e}")
             return
 
-        answers_list: List[MinimalAnswer] = []
+        questions = [item.question for item in search_data.search_results]
+        sources_list = [
+            item.retrieved_sources for item in search_data.search_results
+        ]
 
-        for item in tqdm(search_data.search_results,
-                         desc="Generating answers"):
-            try:
-                answer_text = generator.answer(
-                    item.question, item.retrieved_sources
-                )
-            except Exception as e:
-                TerminalColors.error(
-                    "\nFailed to generate answer for query "
-                    f"'{item.question_id}': {e}"
-                )
-                answer_text = "Generation error."
-
-            answers_list.append(
-                MinimalAnswer(
-                    question_id=item.question_id,
-                    question=item.question,
-                    retrieved_sources=item.retrieved_sources,
-                    answer=answer_text
-                )
+        try:
+            answer_texts = generator.answer_batch(
+                questions, sources_list, batch_size=batch_size
             )
+        except Exception as e:
+            TerminalColors.error(f"Batch generation failed: {e}")
+            TerminalColors.warning(
+                "Falling back to sequential generation for this run."
+            )
+            answer_texts = []
+            for item in tqdm(search_data.search_results,
+                             desc="Generating answers (fallback)"):
+                try:
+                    answer_texts.append(
+                        generator.answer(item.question, item.retrieved_sources)
+                    )
+                except Exception as item_error:
+                    TerminalColors.error(
+                        "\nFailed to generate answer for query "
+                        f"'{item.question_id}': {item_error}"
+                    )
+                    answer_texts.append("Generation error.")
+
+        answers_list: List[MinimalAnswer] = [
+            MinimalAnswer(
+                question_id=item.question_id,
+                question=item.question,
+                retrieved_sources=item.retrieved_sources,
+                answer=answer_text
+            )
+            for item, answer_text in zip(search_data.search_results, answer_texts)
+        ]
 
         final_answers = StudentSearchResultsAndAnswer(
             k=search_data.k,
