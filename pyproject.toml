@@ -16,3 +16,8 @@ dependencies = [
     "tqdm>=4.68.3",
     "transformers>=5.12.1",
 ]
+
+[dependency-groups]
+dev = [
+    "types-tqdm>=4.69.0.20260724",
+]
