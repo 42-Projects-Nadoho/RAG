@@ -4,8 +4,8 @@ Utility script to decompress the project archives and place their content
 under the expected data layout:
 
     data/raw/          <- corpus archive (e.g. the vLLM 0.10.1 source tree)
-    data/datasets/      <- datasets archive
-        (UnansweredQuestions/, AnsweredQuestions/)
+    data/datasets/      <- datasets archive (UnansweredQuestions/,
+        AnsweredQuestions/)
 
 Usage:
     python setup_data.py <corpus_archive> <datasets_archive>
@@ -83,12 +83,15 @@ def extract_archive(archive_path: Path, dest_dir: Path) -> None:
 
 def _flatten_single_subdir(dest_dir: Path) -> None:
     """
-    If dest_dir contains exactly one subdirectory and nothing else (a common
-    artifact of archives created from a single top-level folder), move its
-    content up one level and remove the now-empty wrapper directory.
+    Repeatedly unwrap dest_dir while it contains exactly one subdirectory
+    and nothing else (a common artifact of archives created from one or
+    several nested top-level folders, e.g. "public/AnsweredQuestions/..."),
+    moving content up one level and removing the emptied wrapper each time.
     """
-    entries: List[Path] = list(dest_dir.iterdir())
-    if len(entries) == 1 and entries[0].is_dir():
+    while True:
+        entries: List[Path] = list(dest_dir.iterdir())
+        if len(entries) != 1 or not entries[0].is_dir():
+            break
         wrapper = entries[0]
         for item in wrapper.iterdir():
             shutil.move(str(item), str(dest_dir / item.name))
@@ -96,12 +99,10 @@ def _flatten_single_subdir(dest_dir: Path) -> None:
 
 
 def main() -> None:
-    """
-    Parse CLI arguments and extract both archives to their destinations.
-    """
+    """Parse CLI arguments and extract both archives to their destinations."""
     if len(sys.argv) != 3:
         print(
-            "Usage: python setup_data.py <vllm_archive> <datasets_archive>"
+            "Usage: python setup_data.py <corpus_archive> <datasets_archive>"
         )
         sys.exit(1)
 
@@ -111,7 +112,6 @@ def main() -> None:
     try:
         print(f"Extracting corpus archive into {RAW_DIR}/ ...")
         extract_archive(corpus_archive, RAW_DIR)
-        _flatten_single_subdir(RAW_DIR)
         print(f"Corpus ready under {RAW_DIR}/")
 
         print(f"Extracting datasets archive into {DATASETS_DIR}/ ...")
