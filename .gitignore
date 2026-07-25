@@ -13,3 +13,5 @@ __pycache__/
 #Generate, processed and subject data
 data
 moulinette*
+
+test.sh

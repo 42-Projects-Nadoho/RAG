@@ -80,28 +80,27 @@ returned as ranked source locations (`file_path`,
 *Evaluated with default parameters: max_chunk_size=2000, BM25 (k1=1.5, b=0.75).*
 
 | Metric                     | Docs questions | Code questions | Target |
-|-----------------------------|-----------------|-----------------|-----------------
-| Recall@1                   | `<TODO>`        | `<TODO>`        | `None`        |
-| Recall@3                   | `<TODO>`        | `<TODO>`        | `None`        |
-| Recall@5                   | `<TODO>`        | `<TODO>`        | **Docs: >80% / Code: >50%**       |
-| Recall@10                  | `<TODO>`        | `<TODO>`        | `None`        |
+|----------------------------|-----------------|-----------------|-----------------
+| Recall@1                   | `~=60%`          | `~=41.4%`        | `None`        |
+| Recall@3                   | `~=74%`          | `~=53.5%`       | `None`        |
+| Recall@5                   | `~=82%`          | `~=58.6%`        | **Docs: >80% / Code: >50%**       |
+| Recall@10                  | `~=87%`          | `~=60.6%`        | `None`        |
 
 ### 2. Execution & Resource Metrics
 *Tested on `<TODO: e.g., Apple M1 / 16GB RAM>`.*
 
 | Metric | Measurement | Target |
 |---|---|---|
-| **Indexing time (Full corpus)** | `<TODO>s` | < 300s (5 min) |
-| **Retrieval time (200 queries)** | `10.46` | < 90s |
-| **Generation time (per answer)** | `<TODO>s` | - |
+| **Indexing time (Full corpus)** | `~=9s` | < 300s (5 min) |
+| **Retrieval time (200 queries)** | `~=26s` | < 90s |
 
 ### 3. Ablation Study: Impact of Chunk Size
 *Comparing how chunk size affects Recall@5.*
 
 | Chunk Size | Docs Recall@5 | Code Recall@5 | Indexing Time | Note |
 |---|---|---|---|---|
-| **500 chars** | `<TODO>%` | `<TODO>%` | `<TODO>s` | *Too fragmented for full code blocks.* |
-| **1000 chars**| `<TODO>%` | `<TODO>%` | `<TODO>s` | *Good balance, but misses long doc sections.* |
+| **500 chars** | `~=10s%` | `79%` | `54.5%s` | *Too fragmented for full code blocks.* |
+| **1000 chars**| `~=9s%` | `79%` | `55.6s` | *Good balance, but misses long doc sections.* |
 | **2000 chars**| `<TODO>%` | `<TODO>%` | `<TODO>s` | *Optimal for this moulinette constraint.* |
 
 ## Design Decisions
