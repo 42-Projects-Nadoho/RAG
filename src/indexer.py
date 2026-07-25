@@ -171,4 +171,4 @@ class CodebaseIndexer(BaseModel):
         out_p = Path(output_path)
         out_p.parent.mkdir(parents=True, exist_ok=True)
         with open(out_p, "wb") as f:
-            pickle.dump(index.dict(), f)
+            pickle.dump(index.model_dump(), f)
