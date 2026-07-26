@@ -24,6 +24,12 @@ from src.models.student import (
 )
 
 
+DATASET_PATH = "data/datasets/UnansweredQuestions/dataset_docs_public.json"
+STUDENT_SEARCH_RESULT = "data/output/search_results/dataset_docs_public.json"
+SAVE_DIRECTORY = "data/output/search_results_and_answer"
+ANSWER_PATH = "data/datasets/AnsweredQuestions/dataset_docs_public.json"
+
+
 class RagPipeline:
     """
     Core orchestration class for the RAG against the machine project.
@@ -105,6 +111,10 @@ class RagPipeline:
             k (int): The number of top-scoring sources to retrieve.
         """
         index_path = "data/processed/bm25_index.pkl"
+        if not query.strip():
+            TerminalColors.warning("The search query cannot be empty.")
+            return
+
         if k <= 0:
             TerminalColors.error(f"Value of k : {k} is invalid")
             return
@@ -137,9 +147,10 @@ class RagPipeline:
             )
 
     def search_dataset(self,
-                       dataset_path: str,
-                       k: int,
-                       save_directory: str) -> None:
+                       dataset_path: str = DATASET_PATH,
+                       k: int = 5,
+                       save_directory: str = "data/output/search_results"
+                       ) -> None:
         """
         Run search over a dataset and write a StudentSearchResults JSON.
 
@@ -252,6 +263,10 @@ class RagPipeline:
         index_path = "data/processed/bm25_index.pkl"
         retriever = CodebaseRetriever()
 
+        if not query.strip():
+            TerminalColors.warning("The question query cannot be empty.")
+            return
+
         try:
             retriever.load_index(index_path)
         except Exception as e:
@@ -279,12 +294,13 @@ class RagPipeline:
         print("\n" + "="*50)
         TerminalColors.info(f"QUESTION: {query}")
         print("="*50)
-        TerminalColors.success(f"RÉPONSE GÉNÉRÉE:\n{answer_text}")
+        TerminalColors.success(f"SUCESSFUL GENERATION:\n{answer_text}")
         print("="*50)
 
-    def answer_dataset(self,
-                       student_search_results_path: str,
-                       save_directory: str) -> None:
+    def answer_dataset(
+            self,
+            student_search_results_path: str = STUDENT_SEARCH_RESULT,
+            save_directory: str = SAVE_DIRECTORY) -> None:
         """
         Generate answers from a StudentSearchResults JSON.
 
@@ -388,8 +404,8 @@ class RagPipeline:
             TerminalColors.error(f"System error while saving answers: {e}")
 
     def evaluate(self,
-                 student_search_results_path: str,
-                 dataset_path: str) -> None:
+                 student_search_results_path: str = STUDENT_SEARCH_RESULT,
+                 dataset_path: str = ANSWER_PATH) -> None:
         """
         Delegate evaluation to the RagEvaluator module.
 
